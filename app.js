@@ -26,7 +26,7 @@ var bodyParser     =         require("body-parser");
 var connect = require('connect');
 var mongoose       =         require('mongoose');
 var fs = require('fs');
-
+var Pusher = require('pusher');
 
 const Nexmo = require('nexmo');
 const nexmo = new Nexmo({
@@ -174,7 +174,8 @@ var Lead = new mongoose.Schema({
   drop_done: {type: String,default:'no-value'},
   clothsArray: { type: Array, default: [] },
   discount: {type: String,default:'no-discount'},
-  credit_used:{type: String,default:'false'}
+  credit_used:{type: String,default:'false'},
+  cancelPickup:{type:String,default:'false'}
 });
 
 var OrderId = new mongoose.Schema({
@@ -201,11 +202,17 @@ var Product = new mongoose.Schema({
   softTouchPrice: {type: String,default:'no-value'},
   safeWashPrice: {type: String,default:'no-value'},
   ironingPrice: {type: String,default:'no-value'},
-  dryCleanPrice: {type: String,default:'no-value'}
+  dryCleanPrice: {type: String,default:'no-value'},
+  productType: {type: String,default:'no-value'}
 });
 
 var Address = new mongoose.Schema({
+  area: {type: String,default:'no-value'}
+});
+
+var SubAddress = new mongoose.Schema({
   area: {type: String,default:'no-value'},
+  sub_area: {type: String,default:'no-value'},
   pincode: {type: String,default:'no-value'}
 });
 
@@ -251,6 +258,8 @@ var CustomerUser = mongoose.model('customer_user', CustomerUser);
 
 var Address = mongoose.model('address', Address);
 
+var SubAddress = mongoose.model('sub_address', SubAddress);
+
 var PickupTime = mongoose.model('pickup_time', PickupTime);
 
 var Faq = mongoose.model('faq', Faq);
@@ -268,11 +277,19 @@ console.log("__dirname");
 });
 
 var smtpTransport = nodemailer.createTransport("SMTP",{
-service: "Gmail",
-auth: {
-user: "vinitraj96@gmail.com",
-pass: "sugun.bintu.123&"
-}
+  service: "Gmail",
+  auth: {
+    user: "vinitraj96@gmail.com",
+    pass: "sugun.bintu.123&"
+  }
+});
+
+var pusher = new Pusher({
+  appId: '494855',
+  key: '972289c5e36e1fbb12cd',
+  secret: '2cad06832636a4b13dab',
+  cluster: 'ap2',
+  encrypted: true
 });
 
 ///////////////////////////////////////////////////// Registration and Login Routes Starts /////////////////////////////////////////////
@@ -610,8 +627,28 @@ app.post('/register',function(req,res){
 
 });
 
+app.post('/pusher/auth', function(req, res) {
+  var socketId = req.body.socket_id;
+  var channel = req.body.channel_name;
+
+  console.log("socketId >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ");
+  console.log(socketId);
+  
+  console.log("channel >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ");
+  console.log(channel);
+    
+  //var auth = pusher.authenticate(socketId, channel);
+ // res.send(auth);
+});
+
 app.post('/loginUsingPassword',function(req,res){
   console.log("loginUsingPassword");
+  var socketId = req.body.socket_id;
+  console.log("socketId >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ");
+  console.log(socketId);
+  pusher.trigger('my-channel', 'my-event', {
+    message: 'hello world'
+  });
   var mobile_no=req.body.mobile_no;
   var password=req.body.password;
 /*  nexmo.message.sendSms(
@@ -699,34 +736,44 @@ app.post('/ChangePassword',function(req,res){
   console.log("ChangePassword");
   var mobile_no=req.body.mobile_no;
   var password=req.body.newPassword;
-   CustomerUser.find({mobile_no:mobile_no},function(err,doc){
+  CustomerUser.find({mobile_no:mobile_no},function(err,doc){
     if(err){
       console.log('error');
     }else{
       if(doc.length===0){
-        CustomerUser.update({email:mobile_no},{
-          $set: {
-            password : password
-          }
-        },function(err,doc){
+        CustomerUser.find({email:mobile_no},function(err,doc){
           if(err){
             console.log('error');
           }else{
-             res.json({"doc":"valid"});
+            if(doc.length===0){
+                res.json({"doc":"invalid"});
+            }else{
+              CustomerUser.update({email:mobile_no},{
+                $set: {
+                  password : password
+                }
+              },function(err,doc1){
+                if(err){
+                  console.log('error');
+                }else{
+                  res.json({"doc":"valid","data":doc[0]});
+                }
+              });
+            }
           }
         });  
       }else{
-        CustomerUser.update({mobile_no:mobile_no},{
-          $set: {
-            password : password
-          }
-        },function(err,doc){
-          if(err){
-            console.log('error');
-          }else{
-             res.json({"doc":"valid"});
-          }
-        });  
+      CustomerUser.update({mobile_no:mobile_no},{
+        $set: {
+          password : password
+        }
+      },function(err,doc1){
+        if(err){
+          console.log('error');
+        }else{
+           res.json({"doc":"valid","data":doc[0]});
+        }
+      });  
       }
     }
   });
@@ -809,9 +856,7 @@ app.post('/updateProfileWithinApp',function(req,res){
     if(err){
       console.log('error');
     }else{
-      if(doc.length===0){
-          res.json({"doc":"email already exist"});
-      }else{
+      if(doc.length==0){
         CustomerUser.update({mobile_no:mobile_no},
         {
           $set: {
@@ -825,6 +870,24 @@ app.post('/updateProfileWithinApp',function(req,res){
              res.json({"doc":"valid"});
           }
         });
+      }else{
+        if(doc[0].mobile_no==mobile_no){
+          CustomerUser.update({mobile_no:mobile_no},
+          {
+            $set: {
+              username : username,
+              email : email
+            }
+          },function(err,doc){
+            if(err){
+              console.log('error');
+            }else{
+               res.json({"doc":"valid"});
+            }
+          });
+        }else{
+          res.json({"doc":"email already exist"});  
+        }
       }
     }
   });        
@@ -1836,6 +1899,7 @@ app.post('/addProduct',function(req,res){
   var safeWashPrice = req.body.safeWashPrice;
   var ironingPrice = req.body.ironingPrice;
   var dryCleanPrice = req.body.dryCleanPrice;
+  var selectedProductType = req.body.selectedProductType;
   
   Product.find({productName:productName},function(err,data){
     if(err){
@@ -1862,7 +1926,8 @@ app.post('/addProduct',function(req,res){
           softTouchPrice : softTouchPrice,
           safeWashPrice : safeWashPrice,
           ironingPrice : ironingPrice,
-          dryCleanPrice : dryCleanPrice
+          dryCleanPrice : dryCleanPrice,
+          productType : selectedProductType
         }).save(function(err, doc){
           if(err) console.log('error');
           else{
@@ -1897,6 +1962,18 @@ app.post('/fetchProduct',function(req,res){
   });
 });
 
+app.post('/fetchProductForPriceListPage',function(req,res){
+  console.log("fetchProductForPriceListPage");
+  var productType = req.body.productType;
+  Product.find({productType:productType},function(err,data){
+    if(err){
+
+    }else{
+      res.json({"doc": "valid","data":data});
+    }
+  });
+});
+
 app.post('/fetchCloths',function(req,res){
   console.log("fetchCloths");
   var order_id = req.body.order_id;
@@ -1905,6 +1982,29 @@ app.post('/fetchCloths',function(req,res){
 
     }else{
       res.json({"doc": "valid","data":data});
+    }
+  });
+});
+
+app.post('/cancelPickup',function(req,res){
+  console.log("fetchCloths");
+  var order_id = req.body.order_id;
+  Lead.find({order_id:order_id},function(err,data){
+    if(err){
+
+    }else{
+      Lead.update({'order_id':order_id},{
+        $set: {
+         cancelPickup:"true",
+         pickup_done:"cancel"
+        }
+      },function(err,doc){
+        if(err){
+          console.log('error');
+        }else{
+            res.json({"doc": "valid"});
+        }
+      });
     }
   });
 });
@@ -2412,18 +2512,14 @@ app.post('/fetchFaq',function(req,res){
   });
 });
 
-app.post('/addAreaAndPincode',function(req,res){
+app.post('/addArea',function(req,res){
   var area = req.body.area;
-  var pincode = req.body.pincode;
-
-  Address.find({$and:[{area:area},{pincode:pincode}]},function(err,data){
+  Address.find({$and:[{area:area}]},function(err,data){
     if(err){
-
     }else{
       if(data.length==0){
         new Address({
-          area : area,
-          pincode : pincode,
+          area : area
         }).save(function(err, doc){
           if(err) console.log('error');
           else{
@@ -2433,6 +2529,63 @@ app.post('/addAreaAndPincode',function(req,res){
         });
       }else{
         res.json({"doc":"invalid"});  
+      }
+    }
+  });
+});
+
+app.post('/addSubArea',function(req,res){
+  var area = req.body.area;
+  var sub_area = req.body.sub_area;
+  var pincode = req.body.pincode;
+  SubAddress.find({$and:[{sub_area:sub_area},{area:area},{pincode:pincode}]},function(err,data){
+    if(err){
+    }else{
+      if(data.length==0){
+                      new SubAddress({
+                area : area,
+                sub_area : sub_area,
+                pincode : pincode
+              }).save(function(err, doc){
+                if(err) console.log('error');
+                else{
+                  //setTimeout(myFunc, 5 * 60 * 1000,mobileNo,otp,res);
+                  res.json({"doc":"valid"});
+                }
+              });
+            
+        
+      }else{
+        res.json({"doc":"invalid"});  
+      }
+    }
+  });
+});
+
+app.post('/fetchSubArea',function(req,res){
+   var area = req.body.area;
+  
+   SubAddress.find({area:area},function(err,data){
+    if(err){
+
+    }else{
+      if(data.length==0){
+        res.json({"doc":"invalid"});
+      }else{
+        res.json({"doc":"valid","data":data});
+      }
+    }
+  });
+});
+
+app.post('/fetchSubAreaNew',function(req,res){
+   SubAddress.find({},function(err,data){
+    if(err){
+    }else{
+      if(data.length==0){
+        res.json({"doc":"invalid"});
+      }else{
+        res.json({"doc":"valid","data":data});
       }
     }
   });
@@ -2519,27 +2672,57 @@ app.post('/deleteAddress',function(req,res){
 });
 
 app.post('/addReferAndEarn',function(req,res){
-    var reffered_to = req.body.email;
-    var reffered_by = req.body.mobile_no;
-    var promocode = req.body.promocode;
-    console.log("promocode");
-    console.log(promocode);
-    Promocode.find({promocode: promocode},function(err,data){
-      if(data.length==0){
-        new Promocode({
-          promocode: promocode,
-          reffered_by: reffered_by,
-          reffered_to: reffered_to
-        }).save(function(err, doc){
-          if(err) console.log('error');
-          else{
-            res.json({"doc":"valid"});
+  var reffered_to = req.body.email;
+  var reffered_by = req.body.mobile_no;
+  var promocode = req.body.promocode;
+  console.log("promocode");
+  console.log(promocode);
+  CustomerUser.find({mobile_no:reffered_to},function(err,doc){
+    if(err){
+
+    }else{
+      if(doc.length==0){
+        CustomerUser.find({mobile_no:reffered_to},function(err,doc){
+          if(err){
+
+          }else{
+            if(doc.length==0){
+              Promocode.find({promocode: promocode},function(err,data){
+                if(data.length==0){
+                  Promocode.find({$and:[{reffered_to:reffered_to},{reffered_by:reffered_by}]},function(err,data1){
+                    if(err){
+
+                    }else{
+                      if(data1.length==0){
+                        new Promocode({
+                          promocode: promocode,
+                          reffered_by: reffered_by,
+                          reffered_to: reffered_to
+                        }).save(function(err, doc){
+                          if(err) console.log('error');
+                          else{
+                            res.json({"doc":"valid"});
+                          }
+                        });
+                      }else{
+                        res.json({"doc":"already refered this user"});
+                      }    
+                    }
+                  });
+                }else{
+                  res.json({"doc":"invalid promocode"});
+                }
+              });
+            }else{
+              res.json({"doc":"already registered with us"});
+            }
           }
         });
       }else{
-        res.json({"doc":"invalid"});
+        res.json({"doc":"already registered with us"});
       }
-    });
+    }
+  });
 });
 
 // Start the server
